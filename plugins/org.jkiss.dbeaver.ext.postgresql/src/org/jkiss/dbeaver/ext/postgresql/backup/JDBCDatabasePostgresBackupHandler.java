@@ -25,6 +25,10 @@ import org.jkiss.dbeaver.model.sql.backup.JDBCDatabaseBackupHandler;
 import org.jkiss.dbeaver.runtime.DBWorkbench;
 import org.jkiss.utils.CommonUtils;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -52,21 +56,27 @@ public class JDBCDatabasePostgresBackupHandler implements JDBCDatabaseBackupHand
                 processBuilder.redirectErrorStream(true);
                 Process process = processBuilder.start();
 
-                while (process.isAlive()) {
-                    try {
-                        Thread.sleep(1000);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
+                try (InputStream inputStream = process.getInputStream();
+                     InputStreamReader inputStreamReader = new InputStreamReader(inputStream);
+                     BufferedReader bufferedReader = new BufferedReader(inputStreamReader)) {
+
+                    StringBuilder processOutput = new StringBuilder();
+                    String line;
+                    while ((line = bufferedReader.readLine()) != null) {
+                        processOutput.append(line).append("\n");
                     }
-                }
 
-                int exitCode = process.exitValue();
+                    int exitCode = process.waitFor();
 
-                if (exitCode == 0) {
-                    log.info("Postgres backup successful");
-                } else {
-                    log.error("Postgres backup failed");
-                    throw new DBException("Postgres backup failed");
+                    if (exitCode == 0) {
+                        log.info("Postgres backup successful");
+                    } else {
+                        Files.deleteIfExists(backupFile);
+                        log.error("Postgres backup failed with output: " + processOutput.toString());
+                        throw new DBException("Postgres backup failed");
+                    }
+                } catch (IOException e) {
+                    log.error("Error reading process output", e);
                 }
             }
         } catch (Exception e) {
